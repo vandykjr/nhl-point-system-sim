@@ -1,10 +1,10 @@
 import simpy
 import random
 
-GOAL_RATE_HOME_5v5 = 28.6  # minutes per goal
-GOAL_RATE_AWAY_5v5 = 26.2  
-GOAL_RATE_HOME_4v4 = 27.8  
-GOAL_RATE_AWAY_4v4 = 21.4  
+GOAL_RATE_HOME_5v5 = 26.2  # minutes per goal
+GOAL_RATE_AWAY_5v5 = 28.6 
+GOAL_RATE_HOME_4v4 = 21.4
+GOAL_RATE_AWAY_4v4 = 227.8 
 GOAL_RATE_HOME_5v4 = 9.5  
 GOAL_RATE_AWAY_5v4 = 9.8
 GOAL_RATE_HOME_4v5 = 70.3  
@@ -40,6 +40,8 @@ class Team:
         self.active_penalty_ids = []
         self.cleared_penalty_ids = []
         self.penalty_counter = 0
+        self.goalie_pull_time = GOALIE_PULL_TIME
+        self.goalie_pull_time_2 = GOALIE_PULL_TIME_2
 
 
 def penalty_killer(env, team, p_id):
