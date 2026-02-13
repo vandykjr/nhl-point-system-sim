@@ -236,10 +236,10 @@ def hockey_simulation(env, home_team, away_team, game_length=60, ot=True):
         if ot:
             random_value = random.random()
             if random_value <= 0.5:
-                print("Overtime Result: Home team wins in OT!")
+                print(f"Overtime Result: {home_team.name} win in OT!")
                 return 1
             else:
-                print("Overtime Result: Away team wins in OT!")
+                print(f"Overtime Result: {away_team.name} win in OT!")
                 return 3
         return 4
 

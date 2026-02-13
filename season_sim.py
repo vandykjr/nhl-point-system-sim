@@ -1,6 +1,6 @@
 from game_sim import Team, hockey_simulation
 import simpy
-REGULATION_WIN_POINTS = 2
+REGULATION_WIN_POINTS = 3
 OT_WIN_POINTS = 2
 TIE_POINTS = 1
 OT_LOSS_POINTS = 1
@@ -13,7 +13,7 @@ def generate_round_robin_schedule(teams, repeats=10):
     n = len(teams)
     schedule = []
     
-    for cycle in range(repeats):
+    for _ in range(repeats):
         rotation = list(teams)
         
         for round_num in range(n - 1):
@@ -33,17 +33,14 @@ def generate_round_robin_schedule(teams, repeats=10):
     return schedule
 
 def print_league_standings(standings):
-    sorted_table = sorted(standings.items(), key=lambda x: (x[1]['PTS'], x[1]['W']), reverse=True)
+    sorted_table = sorted(standings.items(), key=lambda x: (x[1]['PTS'], x[1]['RW'], x[1]['W']), reverse=True)
     
-    # print("\n" + "═" * 45)
-    print(f"{'TEAM':<15} | {'GP':>3} | {'W':>3} | {'L':>3} | {'OTL':>3} | {'PTS':>4}")
-    # print("─" * 45)
+    print(f"{'TEAM':<15} | {'GP':>3} | {'W':>3} | {'L':>3} | {'OTL':>3} | {'PTS':>4} | {'RW':>3}")
     for name, stats in sorted_table:
-        print(f"{name:<15} | {stats['GP']:>3} | {stats['W']:>3} | {stats['L']:>3} | {stats['OTL']:>3} | {stats['PTS']:>4}")
-    # print("═" * 45)
+        print(f"{name:<15} | {stats['GP']:>3} | {stats['W']:>3} | {stats['L']:>3} | {stats['OTL']:>3} | {stats['PTS']:>4} | {stats['RW']:>3}")
 
 def season_simulation(teams, num_games_per_opp=10, game_length=60, ot=True):
-    standings = {team.name: {'GP': 0, 'W': 0, 'L': 0, 'OTL': 0, 'PTS': 0} for team in teams}
+    standings = {team.name: {'GP': 0, 'W': 0, 'L': 0, 'OTL': 0, 'PTS': 0, 'RW': 0} for team in teams}
     full_schedule = generate_round_robin_schedule(teams, repeats=num_games_per_opp)
     
     game_count = 1
@@ -70,10 +67,12 @@ def season_simulation(teams, num_games_per_opp=10, game_length=60, ot=True):
             standings[away_team.name]['GP'] += 1
             if result == 0:  # Home team wins in regulation
                 standings[home_team.name]['W'] += 1
+                standings[home_team.name]['RW'] += 1
                 standings[home_team.name]['PTS'] += REGULATION_WIN_POINTS
                 standings[away_team.name]['L'] += 1
             elif result == 2:  # Away team wins in regulation
                 standings[away_team.name]['W'] += 1
+                standings[away_team.name]['RW'] += 1
                 standings[away_team.name]['PTS'] += REGULATION_WIN_POINTS
                 standings[home_team.name]['L'] += 1
             elif result == 1:  # Home team wins in OT
@@ -104,4 +103,4 @@ if __name__ == "__main__":
     nyr = Team("Rangers")
     chi = Team("Blackhawks")
     teams = [det, tor, bos, mtl, nyr, chi]
-    season_simulation(teams, num_games_per_opp=10, game_length=60, ot=False)
+    season_simulation(teams, num_games_per_opp=10, game_length=60, ot=True)
