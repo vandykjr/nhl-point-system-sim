@@ -1,38 +1,58 @@
 from game_sim import Team, hockey_simulation, strategy
 import simpy
-from numpy import random
+import numpy as np
+import matplotlib.pyplot as plt
 REGULATION_WIN_POINTS = 3
 OT_WIN_POINTS = 2
 TIE_POINTS = 1
 OT_LOSS_POINTS = 1
 REGULATION_LOSS_POINTS = 0
-AGGRESSIVENESS_COEFFICIENT = 3.3077
 OT_PROBABILITY = 0.2
 
-def playoff_probability(standings: dict, games: int, ot: bool, playoff_teams: int) -> dict:
-    probs = {}
-    simulations = 10000
-    playoff_apperances = {team: 0 for team in standings.keys()}
-    for _ in range(simulations):
-        sim_standings = {team: stats.copy() for team, stats in standings.items()}
-        for team in sim_standings.keys():
-            games_remaining = games - sim_standings[team]['GP']
-            if ot:
-                avg_points_per_game = (1 - OT_PROBABILITY)* 0.5 * REGULATION_WIN_POINTS + OT_PROBABILITY * 0.5 * OT_WIN_POINTS + OT_PROBABILITY * 0.5 * OT_LOSS_POINTS +  (1 - OT_PROBABILITY) * 0.5 * REGULATION_LOSS_POINTS
-            else:
-                avg_points_per_game = (1 - OT_PROBABILITY) * 0.5 * REGULATION_WIN_POINTS + OT_PROBABILITY * TIE_POINTS + (1 - OT_PROBABILITY) * 0.5 * REGULATION_LOSS_POINTS
-            sim_standings[team]['PTS'] += random.normal(loc=avg_points_per_game * games_remaining, scale=games_remaining**0.5)
-        sorted_teams = sorted(sim_standings.items(), key=lambda x: x[1]['PTS'], reverse=True)
-        for i in range(playoff_teams):
-            playoff_apperances[sorted_teams[i][0]] += 1
-    for team, count in playoff_apperances.items():
-        probs[team] = count / simulations
-    return sorted(probs.items(), key=lambda x: x[1], reverse=True)
+def playoff_probability(standings: dict, total_games: int, ot: bool, playoff_teams: int, n_sims: int = 10000) -> list:
+    team_names = list(standings.keys())
+    n_teams = len(team_names)
+    
+    current_pts = np.array([standings[t]['PTS'] for t in team_names])
+    games_played = np.array([standings[t]['GP'] for t in team_names])
+    games_remaining = total_games - games_played
+    
+    games_remaining = np.maximum(games_remaining, 0)
 
-def get_goalie_pull_threshold(standings: dict, games: int, ot: bool, playoff_teams: int) -> dict:
+    if ot:
+        avg_ppg = ((1 - OT_PROBABILITY) * 0.5 * REGULATION_WIN_POINTS + 
+                   OT_PROBABILITY * 0.5 * OT_WIN_POINTS + 
+                   OT_PROBABILITY * 0.5 * OT_LOSS_POINTS + 
+                   (1 - OT_PROBABILITY) * 0.5 * REGULATION_LOSS_POINTS)
+    else:
+        avg_ppg = ((1 - OT_PROBABILITY) * 0.5 * REGULATION_WIN_POINTS + 
+                   OT_PROBABILITY * TIE_POINTS + 
+                   (1 - OT_PROBABILITY) * 0.5 * REGULATION_LOSS_POINTS)
+
+    means = avg_ppg * games_remaining
+    stds = np.sqrt(games_remaining)
+    
+    simulated_future_pts = np.random.normal(loc=means, scale=stds, size=(n_sims, n_teams))
+
+    max_possible_pts = games_remaining * REGULATION_WIN_POINTS
+    simulated_future_pts = np.clip(simulated_future_pts, 0, max_possible_pts)
+
+    final_pts = current_pts + simulated_future_pts
+
+    ranks = np.argsort(np.argsort(-final_pts, axis=1), axis=1)
+
+    made_playoffs = ranks < playoff_teams
+    
+    probs_array = np.mean(made_playoffs, axis=0)
+
+    results = {team: prob for team, prob in zip(team_names, probs_array)}
+    return sorted(results.items(), key=lambda x: x[1], reverse=True)
+
+def get_goalie_pull_threshold(standings: dict, games: int, ot: bool, playoff_teams: int) -> tuple[dict, dict]:
     base_probabilities = playoff_probability(standings, games, ot, playoff_teams)
     prob_gained_with_win = {}
     prob_lost_with_loss = {}
+    MIN_THRESHOLD = 0.05
     for team in standings.keys():
         original_prob = dict(base_probabilities)[team]
         standings[team]['PTS'] += REGULATION_WIN_POINTS
@@ -42,14 +62,18 @@ def get_goalie_pull_threshold(standings: dict, games: int, ot: bool, playoff_tea
         standings[team]['PTS'] -= REGULATION_WIN_POINTS
         standings[team]['GP'] -= 1
         
-        standings[team]['PTS'] += OT_LOSS_POINTS
+        standings[team]['PTS'] += REGULATION_LOSS_POINTS
         standings[team]['GP'] += 1
         new_prob_loss = dict(playoff_probability(standings, games, ot, playoff_teams))[team]
         prob_lost_with_loss[team] = original_prob - new_prob_loss
-        standings[team]['PTS'] -= OT_LOSS_POINTS
+        standings[team]['PTS'] -= REGULATION_LOSS_POINTS
         standings[team]['GP'] -= 1
-    thresholds = {team: prob_gained_with_win[team] / prob_lost_with_loss[team] if prob_lost_with_loss[team] > 0 else float('inf') for team in standings.keys()}
-    return thresholds
+    thresholds = {team: prob_gained_with_win[team] / prob_lost_with_loss[team] if prob_lost_with_loss[team] > 0 or prob_gained_with_win[team] > MIN_THRESHOLD else 0.0 for team in standings.keys()}
+    # print(base_probabilities)
+    # print(prob_gained_with_win)
+    # print(prob_lost_with_loss)
+    # print(thresholds)
+    return thresholds, base_probabilities
 
 def generate_round_robin_schedule(teams, repeats=10):
     if len(teams) % 2 != 0:
@@ -86,11 +110,13 @@ def print_league_standings(standings):
 
 def season_simulation(teams, num_games_per_opp=10, game_length=60, ot=True, playoff_teams=4):
     standings = {team.name: {'GP': 0, 'W': 0, 'L': 0, 'OTL': 0, 'PTS': 0, 'RW': 0} for team in teams}
+    standings_list = []
+    probabilities_list = []
     full_schedule = generate_round_robin_schedule(teams, repeats=num_games_per_opp)
     games = num_games_per_opp * (len(teams) - 1)
     game_count = 1
     for round_matchups in full_schedule:
-        thresholds = get_goalie_pull_threshold(standings, games, ot, playoff_teams)
+        thresholds, probabilities = get_goalie_pull_threshold(standings, games, ot, playoff_teams)
         for home_team, away_team in round_matchups:
             if home_team == "BYE" or away_team == "BYE": 
                 continue
@@ -104,7 +130,7 @@ def season_simulation(teams, num_games_per_opp=10, game_length=60, ot=True, play
                 team.penalty_counter = 0
                 team.pull_goalie_in_tie = thresholds[team.name] > team.pull_in_tie_threshold
             
-            print(f"\nStarting Game {game_count}: {home_team.name} vs {away_team.name}")
+            # print(f"\nStarting Game {game_count}: {home_team.name} vs {away_team.name}")
             game_process = env.process(hockey_simulation(env, home_team, away_team, game_length, ot))
             env.run(until=game_process)
         
@@ -137,17 +163,133 @@ def season_simulation(teams, num_games_per_opp=10, game_length=60, ot=True, play
                 standings[home_team.name]['OTL'] += 1
                 standings[away_team.name]['OTL'] += 1
             game_count += 1
-        # print(playoff_probability(standings, games=games, ot=ot, playoff_teams=playoff_teams))
-        print_league_standings(standings)
-    # print_league_standings(standings)
+        # print_league_standings(standings)
+        standings_list.append({team: stats.copy() for team, stats in standings.items()})
+        probabilities_list.append(probabilities)
+    print_league_standings(standings)
+    return standings_list, probabilities_list    
+
+def plot_probs_by_rank(avg_probs_by_rank):
+    plt.figure(figsize=(12, 7))
+    for r in range(avg_probs_by_rank.shape[1]):
+        plt.plot(avg_probs_by_rank[:, r], label=f"Rank {r+1}")
     
+    plt.title("Average Playoff Probability Based on Current Rank")
+    plt.xlabel("Days / Games into Season")
+    plt.ylabel("Playoff Probability")
+    plt.ylim(0, 1.05)
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    plt.show()
+
+def plot_playoff_percent_by_pull_threshold(playoff_percentages, pull_thresholds):
+    plt.figure(figsize=(10, 6))
+    
+    # Using strings for x-ticks often helps if thresholds are close together
+    x_labels = [str(t) for t in pull_thresholds]
+    
+    bars = plt.bar(x_labels, playoff_percentages, color='skyblue', edgecolor='navy', alpha=0.8)
+    
+    # Adding data labels on top of bars for clarity
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2, yval + 0.01, f'{yval:.1%}', ha='center', va='bottom')
+
+    plt.title("Playoff Success vs. Goalie Pull Strategy", fontsize=14)
+    plt.xlabel("Goalie Pull Threshold (Minutes Remaining)", fontsize=12)
+    plt.ylabel("Percentage of Seasons Made Playoffs", fontsize=12)
+    plt.ylim(0, max(playoff_percentages) + 0.1) # Add some head room for labels
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()
 
 if __name__ == "__main__":
-    det = Team("Red Wings", strategy=strategy.BALANCED, pull_in_tie_threshold=3.3077)
-    tor = Team("Maple Leafs", strategy=strategy.BALANCED, pull_in_tie_threshold=1.0)
-    bos = Team("Bruins", strategy=strategy.BALANCED, pull_in_tie_threshold=3.0)
-    mtl = Team("Canadiens", strategy=strategy.BALANCED, pull_in_tie_threshold=2.3077)
-    nyr = Team("Rangers", strategy=strategy.BALANCED, pull_in_tie_threshold=4.3077)
-    chi = Team("Blackhawks", strategy=strategy.BALANCED, pull_in_tie_threshold=float('inf'))
+    det = Team("Red Wings", strategy=strategy.BALANCED, pull_in_tie_threshold=2.5)
+    tor = Team("Maple Leafs", strategy=strategy.BALANCED, pull_in_tie_threshold=3.0)
+    bos = Team("Bruins", strategy=strategy.BALANCED, pull_in_tie_threshold=3.5)
+    mtl = Team("Canadiens", strategy=strategy.BALANCED, pull_in_tie_threshold=2.0)
+    nyr = Team("Rangers", strategy=strategy.BALANCED, pull_in_tie_threshold=1.0)
+    chi = Team("Blackhawks", strategy=strategy.BALANCED, pull_in_tie_threshold=1.5)
     teams = [tor,chi,det,bos,mtl,nyr]
-    season_simulation(teams, num_games_per_opp=16, game_length=60, ot=True, playoff_teams=4)
+    standings_list_list = []
+    probabilities_list_list = []
+    seasons_to_sim = 10
+    for _ in range(seasons_to_sim):
+        standings_list, probabilities_list = season_simulation(teams, num_games_per_opp=16, game_length=60, ot=True, playoff_teams=4)
+        standings_list_list.append(standings_list)
+        probabilities_list_list.append(probabilities_list)
+    playoffs_made_percentages = {team.name: 0 for team in teams}
+    avg_rankings = {team.name: 0 for team in teams}
+    avg_points = {team.name: 0 for team in teams}
+    std_dev_points_by_team = {team.name: 0 for team in teams}
+    std_dev_points_ovr = 0
+    avg_probs_by_team = {team.name: 0 for team in teams}
+    avg_probs_by_rank = {rank: 0 for rank in range(1, len(teams) + 1)}
+    for standings_list in standings_list_list:
+        final_standings = standings_list[-1]
+        sorted_teams = sorted(final_standings.items(), key=lambda x: (x[1]['PTS'], x[1]['RW'], x[1]['W']), reverse=True)
+        std_dev_points_ovr += np.std([stats['PTS'] for team_name, stats in sorted_teams])
+        for rank, (team_name, stats) in enumerate(sorted_teams, start=1):
+            avg_rankings[team_name] += rank
+            avg_points[team_name] += stats['PTS']
+            std_dev_points_by_team[team_name] += stats['PTS'] ** 2
+            if rank <= 4:
+                playoffs_made_percentages[team_name] += 1
+    std_dev_points_ovr /= seasons_to_sim
+    for team_name in playoffs_made_percentages.keys():
+        playoffs_made_percentages[team_name] /= seasons_to_sim
+        avg_rankings[team_name] /= seasons_to_sim
+        avg_points[team_name] /= seasons_to_sim
+        std_dev_points_by_team[team_name] = np.sqrt(std_dev_points_by_team[team_name] / seasons_to_sim - avg_points[team_name] ** 2)
+    print("Playoff Percentages:")
+    for team_name, percentage in playoffs_made_percentages.items():
+        print(f"{team_name}: {percentage:.2%}")
+    print("\nAverage Final Rankings:")
+    for team_name, avg_rank in avg_rankings.items():
+        print(f"{team_name}: {avg_rank:.2f}")
+    print("\nAverage Final Points:")
+    for team_name, avg_pts in avg_points.items():
+        print(f"{team_name}: {avg_pts:.2f} (std dev: {std_dev_points_by_team[team_name]:.2f})")
+    print(f"\nOverall Standard Deviation of Points: {std_dev_points_ovr:.2f}")
+
+    num_time_steps = len(standings_list_list[0])
+    num_teams = len(teams)
+    probs_by_rank_history = np.zeros((num_time_steps, num_teams))
+
+    for s in range(seasons_to_sim):
+        season_standings = standings_list_list[s]
+        season_probs = probabilities_list_list[s]
+        
+        for t in range(num_time_steps):
+            current_standings = season_standings[t]
+            current_probs = dict(season_probs[t])
+            
+            sorted_at_t = sorted(
+                current_standings.items(), 
+                key=lambda x: (x[1]['PTS'], x[1].get('RW', 0), x[1].get('W', 0)), 
+                reverse=True
+            )
+            
+            for rank, (team_name, _) in enumerate(sorted_at_t):
+                probs_by_rank_history[t, rank] += current_probs[team_name]
+
+    avg_probs_by_rank = probs_by_rank_history / seasons_to_sim
+
+    plot_probs_by_rank(avg_probs_by_rank)
+    # 1. Extract the threshold and percentage for each team
+    plot_data = []
+    for team in teams:
+        threshold = team.pull_in_tie_threshold
+        percentage = playoffs_made_percentages[team.name]
+        plot_data.append((threshold, percentage))
+
+    # 2. Sort the data by the threshold (the first element in the tuple)
+    plot_data.sort(key=lambda x: x[0])
+
+    # 3. Unpack the sorted data back into two lists
+    sorted_thresholds = [item[0] for item in plot_data]
+    sorted_percentages = [item[1] for item in plot_data]
+
+    # 4. Call your plotting function with the sorted data
+    plot_playoff_percent_by_pull_threshold(sorted_percentages, sorted_thresholds)

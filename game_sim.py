@@ -64,7 +64,7 @@ def penalty_killer(env, team, p_id):
         if p_id in team.active_penalty_ids:
             team.active_penalty_ids.remove(p_id)
             team.penalties = len(team.active_penalty_ids)
-            print(f"[{env.now:.1f}] {team.name} penalty expires (penalties: {team.penalties})")
+            # print(f"[{env.now:.1f}] {team.name} penalty expires (penalties: {team.penalties})")
 
 def check_goalie_pull(env, home_team, away_team, game_length):
     """Check if either team should pull their goalie"""
@@ -74,31 +74,31 @@ def check_goalie_pull(env, home_team, away_team, game_length):
     if score_diff < 0 and score_diff >= -3:
         if score_diff == -1 and time_remaining <= GOALIE_PULL_TIME and not home_team.goalie_pulled:
             home_team.goalie_pulled = True
-            print(f"[{env.now:.1f}] GOALIE PULL! {home_team.name} pull goalie (down by 1)")
+            # print(f"[{env.now:.1f}] GOALIE PULL! {home_team.name} pull goalie (down by 1)")
         elif time_remaining <= GOALIE_PULL_TIME_2 and not home_team.goalie_pulled:
             home_team.goalie_pulled = True
-            print(f"[{env.now:.1f}] GOALIE PULL! {home_team.name} pull goalie (down by {-score_diff})")
+            # print(f"[{env.now:.1f}] GOALIE PULL! {home_team.name} pull goalie (down by {-score_diff})")
     elif score_diff == 0 and home_team.pull_goalie_in_tie and time_remaining <= GOALIE_PULL_TIME and not home_team.goalie_pulled:
         home_team.goalie_pulled = True
-        print(f"[{env.now:.1f}] GOALIE PULL! {home_team.name} pull goalie (tied game)")
+        # print(f"[{env.now:.1f}] GOALIE PULL! {home_team.name} pull goalie (tied game)")
     elif home_team.goalie_pulled:
         home_team.goalie_pulled = False
-        print(f"[{env.now:.1f}] GOALIE RETURNED! {home_team.name} return goalie to net")
+        # print(f"[{env.now:.1f}] GOALIE RETURNED! {home_team.name} return goalie to net")
     
     score_diff = away_team.goals - home_team.goals
     if score_diff < 0 and score_diff >= -3:
         if score_diff == -1 and time_remaining <= GOALIE_PULL_TIME and not away_team.goalie_pulled:
             away_team.goalie_pulled = True
-            print(f"[{env.now:.1f}] GOALIE PULL! {away_team.name} pull goalie (down by 1)")
+            # print(f"[{env.now:.1f}] GOALIE PULL! {away_team.name} pull goalie (down by 1)")
         elif time_remaining <= GOALIE_PULL_TIME_2 and not away_team.goalie_pulled:
             away_team.goalie_pulled = True
-            print(f"[{env.now:.1f}] GOALIE PULL! {away_team.name} pull goalie (down by {-score_diff})")
+            # print(f"[{env.now:.1f}] GOALIE PULL! {away_team.name} pull goalie (down by {-score_diff})")
     elif score_diff == 0 and away_team.pull_goalie_in_tie and time_remaining <= GOALIE_PULL_TIME and not away_team.goalie_pulled:
         away_team.goalie_pulled = True
-        print(f"[{env.now:.1f}] GOALIE PULL! {away_team.name} pull goalie (tied game)")
+        # print(f"[{env.now:.1f}] GOALIE PULL! {away_team.name} pull goalie (tied game)")
     elif away_team.goalie_pulled:
         away_team.goalie_pulled = False
-        print(f"[{env.now:.1f}] GOALIE RETURNED! {away_team.name} return goalie to net")
+        # print(f"[{env.now:.1f}] GOALIE RETURNED! {away_team.name} return goalie to net")
 
 def get_goal_rate(home_team, away_team, time_remaining):
     if home_team.goalie_pulled:
@@ -223,25 +223,25 @@ def hockey_simulation(env, home_team, away_team, game_length=60, ot=True):
         if event_type == "goal_home":
             home_team.goals += 1
             if away_team.penalties > home_team.penalties:
-                print(f"[{env.now:.1f}] POWER PLAY GOAL! {home_team.name} score!")
+                # print(f"[{env.now:.1f}] POWER PLAY GOAL! {home_team.name} score!")
                 if away_team.active_penalty_ids:
                     oldest_p = away_team.active_penalty_ids.pop(0)
                     away_team.cleared_penalty_ids.append(oldest_p)
                     away_team.penalties = len(away_team.active_penalty_ids)
-            else:
-                print(f"[{env.now:.1f}] GOAL! {home_team.name} score! ({home_team.goals}-{away_team.goals})")
+            # else:
+                # print(f"[{env.now:.1f}] GOAL! {home_team.name} score! ({home_team.goals}-{away_team.goals})")
             check_goalie_pull(env, home_team, away_team, game_length)
         
         elif event_type == "goal_away":
             away_team.goals += 1
             if home_team.penalties > away_team.penalties:
-                print(f"[{env.now:.1f}] POWER PLAY GOAL! {away_team.name} score!")
+                # print(f"[{env.now:.1f}] POWER PLAY GOAL! {away_team.name} score!")
                 if home_team.active_penalty_ids:
                     oldest_p = home_team.active_penalty_ids.pop(0)
                     home_team.cleared_penalty_ids.append(oldest_p)
                     home_team.penalties = len(home_team.active_penalty_ids)
-            else:
-                print(f"[{env.now:.1f}] GOAL! {away_team.name} score! ({home_team.goals}-{away_team.goals})")
+            # else:
+            #     print(f"[{env.now:.1f}] GOAL! {away_team.name} score! ({home_team.goals}-{away_team.goals})")
             check_goalie_pull(env, home_team, away_team, game_length)
         
         elif event_type == "penalty_home":
@@ -249,7 +249,7 @@ def hockey_simulation(env, home_team, away_team, game_length=60, ot=True):
             p_id = home_team.penalty_counter
             home_team.active_penalty_ids.append(p_id)
             home_team.penalties = len(home_team.active_penalty_ids)
-            print(f"[{env.now:.1f}] PENALTY! {home_team.name} (ID:{p_id}) (penalties: {home_team.penalties})")
+            # print(f"[{env.now:.1f}] PENALTY! {home_team.name} (ID:{p_id}) (penalties: {home_team.penalties})")
             env.process(penalty_killer(env, home_team, p_id))
         
         elif event_type == "penalty_away":
@@ -257,7 +257,7 @@ def hockey_simulation(env, home_team, away_team, game_length=60, ot=True):
             p_id = away_team.penalty_counter
             away_team.active_penalty_ids.append(p_id)
             away_team.penalties = len(away_team.active_penalty_ids)
-            print(f"[{env.now:.1f}] PENALTY! {away_team.name} (ID:{p_id}) (penalties: {away_team.penalties})")
+            # print(f"[{env.now:.1f}] PENALTY! {away_team.name} (ID:{p_id}) (penalties: {away_team.penalties})")
             env.process(penalty_killer(env, away_team, p_id))
             
         elif event_type == "check_goalie_pull":
@@ -265,9 +265,9 @@ def hockey_simulation(env, home_team, away_team, game_length=60, ot=True):
         elif event_type == "update_strategy":
             continue
         
-    print("\n" + "="*50)
-    print(f"END OF REGULATION: {home_team.name} {home_team.goals} - {away_team.goals} {away_team.name}")
-    print("="*50)
+    # print("\n" + "="*50)
+    # print(f"END OF REGULATION: {home_team.name} {home_team.goals} - {away_team.goals} {away_team.name}")
+    # print("="*50)
     if home_team.goals > away_team.goals:
         return 0
     elif away_team.goals > home_team.goals:
@@ -276,9 +276,9 @@ def hockey_simulation(env, home_team, away_team, game_length=60, ot=True):
         if ot:
             random_value = random.random()
             if random_value <= 0.5:
-                print(f"Overtime Result: {home_team.name} win in OT!")
+                # print(f"Overtime Result: {home_team.name} win in OT!")
                 return 1
             else:
-                print(f"Overtime Result: {away_team.name} win in OT!")
+                # print(f"Overtime Result: {away_team.name} win in OT!")
                 return 3
         return 4
