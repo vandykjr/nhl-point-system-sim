@@ -1,4 +1,4 @@
-import simpy
+import enum
 import random
 
 GOAL_RATE_HOME_5v5 = 26.2  # minutes per goal
@@ -30,9 +30,18 @@ PENALTY_RATE = 11.2    # minutes per penalty
 PENALTY_LENGTH = 2.0  # minutes
 GOALIE_PULL_TIME = 2.0
 GOALIE_PULL_TIME_2 = 6.0
+AGGRESSIVE_GF_MULTIPLIER = 0.8
+AGGRESSIVE_GA_MULTIPLIER = 0.66666
+CONSERVATIVE_GF_MULTIPLIER = 1.5
+CONSERVATIVE_GA_MULTIPLIER = 1.2
+
+class strategy(enum.Enum):
+    AGGRESSIVE = 1
+    BALANCED = 2
+    CONSERVATIVE = 3
 
 class Team:
-    def __init__(self, name):
+    def __init__(self, name, strategy=strategy.BALANCED, pull_in_tie=False, pull_in_tie_threshold=float('inf')):
         self.name = name
         self.goals = 0
         self.penalties = 0
@@ -40,8 +49,9 @@ class Team:
         self.active_penalty_ids = []
         self.cleared_penalty_ids = []
         self.penalty_counter = 0
-        self.goalie_pull_time = GOALIE_PULL_TIME
-        self.goalie_pull_time_2 = GOALIE_PULL_TIME_2
+        self.strategy = strategy
+        self.pull_goalie_in_tie = pull_in_tie
+        self.pull_in_tie_threshold = pull_in_tie_threshold
 
 
 def penalty_killer(env, team, p_id):
@@ -68,6 +78,9 @@ def check_goalie_pull(env, home_team, away_team, game_length):
         elif time_remaining <= GOALIE_PULL_TIME_2 and not home_team.goalie_pulled:
             home_team.goalie_pulled = True
             print(f"[{env.now:.1f}] GOALIE PULL! {home_team.name} pull goalie (down by {-score_diff})")
+    elif score_diff == 0 and home_team.pull_goalie_in_tie and time_remaining <= GOALIE_PULL_TIME and not home_team.goalie_pulled:
+        home_team.goalie_pulled = True
+        print(f"[{env.now:.1f}] GOALIE PULL! {home_team.name} pull goalie (tied game)")
     elif home_team.goalie_pulled:
         home_team.goalie_pulled = False
         print(f"[{env.now:.1f}] GOALIE RETURNED! {home_team.name} return goalie to net")
@@ -80,75 +93,95 @@ def check_goalie_pull(env, home_team, away_team, game_length):
         elif time_remaining <= GOALIE_PULL_TIME_2 and not away_team.goalie_pulled:
             away_team.goalie_pulled = True
             print(f"[{env.now:.1f}] GOALIE PULL! {away_team.name} pull goalie (down by {-score_diff})")
+    elif score_diff == 0 and away_team.pull_goalie_in_tie and time_remaining <= GOALIE_PULL_TIME and not away_team.goalie_pulled:
+        away_team.goalie_pulled = True
+        print(f"[{env.now:.1f}] GOALIE PULL! {away_team.name} pull goalie (tied game)")
     elif away_team.goalie_pulled:
         away_team.goalie_pulled = False
         print(f"[{env.now:.1f}] GOALIE RETURNED! {away_team.name} return goalie to net")
 
-def get_goal_rate(home_penalties, away_penalties, home_goalie_pulled, away_goalie_pulled):
-    if home_goalie_pulled:
-        if home_penalties == 0 and away_penalties == 0:
-            return GOAL_RATE_HOME_6v5, GOAL_RATE_AWAY_5v5 * OPP_GOALIE_PULL_MULTIPLIER
-        elif home_penalties == 1 and away_penalties == 0:
-            return GOAL_RATE_HOME_5v5, GOAL_RATE_AWAY_5v4 * OPP_GOALIE_PULL_MULTIPLIER
-        elif home_penalties == 0 and away_penalties == 1:
-            return GOAL_RATE_HOME_6v4, GOAL_RATE_AWAY_4v5 * OPP_GOALIE_PULL_MULTIPLIER
-        elif home_penalties == 1 and away_penalties == 1:
-            return GOAL_RATE_HOME_5v4, GOAL_RATE_AWAY_4v4 * OPP_GOALIE_PULL_MULTIPLIER
-        elif home_penalties >= 2 and away_penalties >= 2:
-            return GOAL_RATE_HOME_4v3, GOAL_RATE_AWAY_3v3 * OPP_GOALIE_PULL_MULTIPLIER
-        elif home_penalties >= 2 and away_penalties == 1:
-            return GOAL_RATE_HOME_4v4, GOAL_RATE_AWAY_4v3 * OPP_GOALIE_PULL_MULTIPLIER
-        elif home_penalties >= 2 and away_penalties == 0:
-            return GOAL_RATE_HOME_4v5, GOAL_RATE_AWAY_5v3 * OPP_GOALIE_PULL_MULTIPLIER
-        elif home_penalties == 1 and away_penalties >= 2:
-            return GOAL_RATE_HOME_5v3, GOAL_RATE_AWAY_3v4 * OPP_GOALIE_PULL_MULTIPLIER
-        elif home_penalties == 0 and away_penalties >= 2:
-            return GOAL_RATE_HOME_6v3, GOAL_RATE_AWAY_3v5 * OPP_GOALIE_PULL_MULTIPLIER
-    elif away_goalie_pulled:
-        if home_penalties == 0 and away_penalties == 0:
-            return GOAL_RATE_HOME_5v5 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_6v5
-        elif home_penalties == 1 and away_penalties == 0:
-            return GOAL_RATE_HOME_4v5 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_6v4 
-        elif home_penalties == 0 and away_penalties == 1:
-            return GOAL_RATE_HOME_5v4 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_5v5
-        elif home_penalties == 1 and away_penalties == 1:
-            return GOAL_RATE_HOME_4v4 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_5v4
-        elif home_penalties >= 2 and away_penalties >= 2:
-            return GOAL_RATE_HOME_3v3 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_4v3
-        elif home_penalties >= 2 and away_penalties == 1:
-            return GOAL_RATE_HOME_3v4 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_5v3
-        elif home_penalties >= 2 and away_penalties == 0:
-            return GOAL_RATE_HOME_3v5 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_6v3
-        elif home_penalties == 1 and away_penalties >= 2:
-            return GOAL_RATE_HOME_4v3 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_4v4
-        elif home_penalties == 0 and away_penalties >= 2:
-            return GOAL_RATE_HOME_5v3 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_4v5
+def get_goal_rate(home_team, away_team, time_remaining):
+    if home_team.goalie_pulled:
+        goal_rate = ()
+        if home_team.penalties == 0 and away_team.penalties == 0:
+            goal_rate = GOAL_RATE_HOME_6v5, GOAL_RATE_AWAY_5v5 * OPP_GOALIE_PULL_MULTIPLIER
+        elif home_team.penalties == 1 and away_team.penalties == 0:
+            goal_rate = GOAL_RATE_HOME_5v5, GOAL_RATE_AWAY_5v4 * OPP_GOALIE_PULL_MULTIPLIER
+        elif home_team.penalties == 0 and away_team.penalties == 1:
+            goal_rate = GOAL_RATE_HOME_6v4, GOAL_RATE_AWAY_4v5 * OPP_GOALIE_PULL_MULTIPLIER
+        elif home_team.penalties == 1 and away_team.penalties == 1:
+            goal_rate = GOAL_RATE_HOME_5v4, GOAL_RATE_AWAY_4v4 * OPP_GOALIE_PULL_MULTIPLIER
+        elif home_team.penalties >= 2 and away_team.penalties >= 2:
+            goal_rate = GOAL_RATE_HOME_4v3, GOAL_RATE_AWAY_3v3 * OPP_GOALIE_PULL_MULTIPLIER
+        elif home_team.penalties >= 2 and away_team.penalties == 1:
+            goal_rate = GOAL_RATE_HOME_4v4, GOAL_RATE_AWAY_4v3 * OPP_GOALIE_PULL_MULTIPLIER
+        elif home_team.penalties >= 2 and away_team.penalties == 0:
+            goal_rate = GOAL_RATE_HOME_4v5, GOAL_RATE_AWAY_5v3 * OPP_GOALIE_PULL_MULTIPLIER
+        elif home_team.penalties == 1 and away_team.penalties >= 2:
+            goal_rate = GOAL_RATE_HOME_5v3, GOAL_RATE_AWAY_3v4 * OPP_GOALIE_PULL_MULTIPLIER
+        elif home_team.penalties == 0 and away_team.penalties >= 2:
+            goal_rate = GOAL_RATE_HOME_6v3, GOAL_RATE_AWAY_3v5 * OPP_GOALIE_PULL_MULTIPLIER
+    elif away_team.goalie_pulled:
+        if home_team.penalties == 0 and away_team.penalties == 0:
+            goal_rate = GOAL_RATE_HOME_5v5 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_6v5
+        elif home_team.penalties == 1 and away_team.penalties == 0:
+            goal_rate = GOAL_RATE_HOME_4v5 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_6v4 
+        elif home_team.penalties == 0 and away_team.penalties == 1:
+            goal_rate = GOAL_RATE_HOME_5v4 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_5v5
+        elif home_team.penalties == 1 and away_team.penalties == 1:
+            goal_rate = GOAL_RATE_HOME_4v4 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_5v4
+        elif home_team.penalties >= 2 and away_team.penalties >= 2:
+            goal_rate = GOAL_RATE_HOME_3v3 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_4v3
+        elif home_team.penalties >= 2 and away_team.penalties == 1:
+            goal_rate = GOAL_RATE_HOME_3v4 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_5v3
+        elif home_team.penalties >= 2 and away_team.penalties == 0:
+            goal_rate = GOAL_RATE_HOME_3v5 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_6v3
+        elif home_team.penalties == 1 and away_team.penalties >= 2:
+            goal_rate = GOAL_RATE_HOME_4v3 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_4v4
+        elif home_team.penalties == 0 and away_team.penalties >= 2:
+            goal_rate = GOAL_RATE_HOME_5v3 * OPP_GOALIE_PULL_MULTIPLIER, GOAL_RATE_AWAY_4v5
     else:
-        if home_penalties == 0 and away_penalties == 0:
-            return GOAL_RATE_HOME_5v5, GOAL_RATE_AWAY_5v5
-        elif home_penalties == 1 and away_penalties == 0:
-            return GOAL_RATE_HOME_4v5, GOAL_RATE_AWAY_5v4
-        elif home_penalties == 0 and away_penalties == 1:
-            return GOAL_RATE_HOME_5v4, GOAL_RATE_AWAY_4v5
-        elif home_penalties == 1 and away_penalties == 1:
-            return GOAL_RATE_HOME_4v4, GOAL_RATE_AWAY_4v4
-        elif home_penalties >= 2 and away_penalties >= 2:
-            return GOAL_RATE_HOME_3v3, GOAL_RATE_AWAY_3v3
-        elif home_penalties >= 2 and away_penalties == 1:
-            return GOAL_RATE_HOME_3v4, GOAL_RATE_AWAY_4v3
-        elif home_penalties >= 2 and away_penalties == 0:
-            return GOAL_RATE_HOME_3v5, GOAL_RATE_AWAY_5v3
-        elif home_penalties == 1 and away_penalties >= 2:
-            return GOAL_RATE_HOME_4v3, GOAL_RATE_AWAY_3v4
-        elif home_penalties == 0 and away_penalties >= 2:
-            return GOAL_RATE_HOME_5v3, GOAL_RATE_AWAY_3v5
+        if home_team.penalties == 0 and away_team.penalties == 0:
+            goal_rate = GOAL_RATE_HOME_5v5, GOAL_RATE_AWAY_5v5
+        elif home_team.penalties == 1 and away_team.penalties == 0:
+            goal_rate = GOAL_RATE_HOME_4v5, GOAL_RATE_AWAY_5v4
+        elif home_team.penalties == 0 and away_team.penalties == 1:
+            goal_rate = GOAL_RATE_HOME_5v4, GOAL_RATE_AWAY_4v5
+        elif home_team.penalties == 1 and away_team.penalties == 1:
+            goal_rate = GOAL_RATE_HOME_4v4, GOAL_RATE_AWAY_4v4
+        elif home_team.penalties >= 2 and away_team.penalties >= 2:
+            goal_rate = GOAL_RATE_HOME_3v3, GOAL_RATE_AWAY_3v3
+        elif home_team.penalties >= 2 and away_team.penalties == 1:
+            goal_rate = GOAL_RATE_HOME_3v4, GOAL_RATE_AWAY_4v3
+        elif home_team.penalties >= 2 and away_team.penalties == 0:
+            goal_rate = GOAL_RATE_HOME_3v5, GOAL_RATE_AWAY_5v3
+        elif home_team.penalties == 1 and away_team.penalties >= 2:
+            goal_rate = GOAL_RATE_HOME_4v3, GOAL_RATE_AWAY_3v4
+        elif home_team.penalties == 0 and away_team.penalties >= 2:
+            goal_rate = GOAL_RATE_HOME_5v3, GOAL_RATE_AWAY_3v5
+
+    if time_remaining <= 5.0 and home_team.goals == away_team.goals:
+        if home_team.strategy == strategy.AGGRESSIVE and away_team.strategy == strategy.BALANCED:
+            goal_rate = (goal_rate[0] * AGGRESSIVE_GF_MULTIPLIER, goal_rate[1] * AGGRESSIVE_GA_MULTIPLIER)
+        elif home_team.strategy == strategy.AGGRESSIVE and away_team.strategy == strategy.AGGRESSIVE:
+            goal_rate = (goal_rate[0] * AGGRESSIVE_GA_MULTIPLIER * AGGRESSIVE_GF_MULTIPLIER, goal_rate[1] * AGGRESSIVE_GA_MULTIPLIER * AGGRESSIVE_GF_MULTIPLIER)
+        elif home_team.strategy == strategy.BALANCED and away_team.strategy == strategy.AGGRESSIVE:
+            goal_rate = (goal_rate[0] * AGGRESSIVE_GA_MULTIPLIER, goal_rate[1] * AGGRESSIVE_GF_MULTIPLIER)
+        elif home_team.strategy == strategy.CONSERVATIVE and away_team.strategy == strategy.BALANCED:
+            goal_rate = (goal_rate[0] * CONSERVATIVE_GF_MULTIPLIER, goal_rate[1] * CONSERVATIVE_GA_MULTIPLIER)
+        elif home_team.strategy == strategy.CONSERVATIVE and away_team.strategy == strategy.CONSERVATIVE:
+            goal_rate = (goal_rate[0] * CONSERVATIVE_GF_MULTIPLIER * CONSERVATIVE_GA_MULTIPLIER, goal_rate[1] * CONSERVATIVE_GF_MULTIPLIER * CONSERVATIVE_GA_MULTIPLIER)
+        elif home_team.strategy == strategy.BALANCED and away_team.strategy == strategy.CONSERVATIVE:
+            goal_rate = (goal_rate[0] * CONSERVATIVE_GA_MULTIPLIER, goal_rate[1] * CONSERVATIVE_GF_MULTIPLIER)
+    return goal_rate
+
 
 
 def hockey_simulation(env, home_team, away_team, game_length=60, ot=True):
     """Main simulation process with 5v5, penalties, and power plays"""
-    
     while env.now < game_length:
-        home_goal_rate, away_goal_rate = get_goal_rate(home_team.penalties, away_team.penalties, home_team.goalie_pulled, away_team.goalie_pulled)
+        time_remaining = game_length - env.now
+        home_goal_rate, away_goal_rate = get_goal_rate(home_team, away_team, time_remaining)
         
         time_to_home_goal = random.expovariate(1.0 / home_goal_rate)
         time_to_away_goal = random.expovariate(1.0 / away_goal_rate)
@@ -174,6 +207,9 @@ def hockey_simulation(env, home_team, away_team, game_length=60, ot=True):
         pull_time_1_mark = game_length - GOALIE_PULL_TIME
         if env.now < pull_time_1_mark:
             events.append((pull_time_1_mark, "check_goalie_pull"))
+
+        if env.now < game_length - 5.0:
+            events.append((game_length - 5.0, "update_strategy"))
         
         events.sort()
         
@@ -226,6 +262,8 @@ def hockey_simulation(env, home_team, away_team, game_length=60, ot=True):
             
         elif event_type == "check_goalie_pull":
             check_goalie_pull(env, home_team, away_team, game_length)
+        elif event_type == "update_strategy":
+            continue
         
     print("\n" + "="*50)
     print(f"END OF REGULATION: {home_team.name} {home_team.goals} - {away_team.goals} {away_team.name}")
@@ -244,11 +282,3 @@ def hockey_simulation(env, home_team, away_team, game_length=60, ot=True):
                 print(f"Overtime Result: {away_team.name} win in OT!")
                 return 3
         return 4
-
-
-# if __name__ == "__main__":
-#     home = Team("Red Wings")
-#     away = Team("Maple Leafs")
-#     env = simpy.Environment()
-#     env.process(hockey_simulation(env, home, away, game_length=60))
-#     env.run()
